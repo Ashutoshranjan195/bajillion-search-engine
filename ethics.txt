@@ -1,0 +1,69 @@
+Ethics Questions – CS106A Assignment 6: Bajillion Search Engine
+================================================================
+
+Question 1:
+One of the goals of a search engine is to "democratize" access to
+information – to make it possible for anyone to find what they need.
+In what ways could the design of a search engine undermine that goal,
+even if unintentionally?
+
+Answer:
+A search engine can undermine democratized access in several ways.
+First, the ranking algorithm determines which results users see first,
+and if ranking favors popular or well-established sources, smaller or
+marginalized voices may be effectively silenced even though they are
+technically indexed. This creates a feedback loop: popular pages get
+more clicks, which reinforces their ranking, while newer or minority
+perspectives are buried.
+
+Second, the way content is indexed matters. Our simple search engine
+treats all documents equally, but real-world engines make choices about
+what content to crawl and how often to re-index it. If a search engine
+disproportionately crawls content in English or from wealthy nations,
+it creates an access gap for users seeking information in other
+languages or from underrepresented communities.
+
+Third, the query interface itself can be a barrier. Users who are more
+experienced with technology may construct better queries and thus get
+better results, while less tech-savvy users may struggle. Autocomplete
+and suggestion features, while helpful, can also steer users toward
+popular interpretations of a query and away from niche but valid ones.
+
+Finally, search engines can be manipulated through techniques like SEO
+(Search Engine Optimization). Entities with more resources can invest
+in SEO to ensure their content ranks higher, effectively buying
+visibility at the expense of those who lack such resources. This
+commercialization of search results works against the democratic ideal.
+
+
+Question 2:
+If you were building a search engine that would be used by millions of
+people, what is one ethical consideration you would want to think about
+carefully as you designed it?
+
+Answer:
+I would think carefully about user privacy and data collection. A
+search engine used by millions of people has access to an extraordinary
+amount of personal information – not just names and emails, but the
+queries themselves, which reveal what people are curious about, worried
+about, or struggling with. Search queries can expose health concerns,
+political beliefs, financial difficulties, and deeply personal matters.
+
+This data, if stored and analyzed, can be used to build detailed
+profiles of individuals. While personalization can improve search
+quality, it also creates risks: data breaches could expose sensitive
+queries, and aggregated data could be sold to advertisers or handed
+over to governments. Users searching for sensitive topics – such as
+information about addiction, domestic abuse, or political dissent –
+may face real-world consequences if their queries are linked back to
+their identities.
+
+As a designer, I would want to minimize data retention (collecting only
+what is necessary and deleting it promptly), provide transparency about
+what data is collected and how it is used, offer users meaningful
+control over their data (including the ability to delete their search
+history), and resist pressure to share user data with third parties
+without clear legal obligations. I would also consider offering an
+anonymous search mode where queries are not linked to user accounts at
+all. The guiding principle should be that the search engine exists to
+serve its users, not to extract value from them.
