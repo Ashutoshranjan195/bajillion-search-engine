@@ -1,11 +1,14 @@
 # Bajillion Search Engine 🔍
 
+![Bajillion Search Engine Banner](thumbnail.png)
+
 **Stanford CS106A – Assignment 6**
 
 A simple search engine that builds an inverted index from a collection of text files and supports interactive Boolean AND queries.
 
-## Screenshot
+## Screenshots
 
+### Interactive Search
 ![Bajillion Search Engine Demo](screenshot.png)
 
 ## Files
