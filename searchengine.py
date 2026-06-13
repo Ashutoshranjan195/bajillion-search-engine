@@ -1,19 +1,27 @@
 """
-File: searchengine.py
----------------------
-CS106A Assignment 6: Bajillion Search Engine
+Bajillion Search Engine
+========================
+A complete implementation of the Stanford CS106A "Bajillion" search
+engine assignment: builds an inverted index from a folder of .txt news
+articles, then lets the user run keyword (Boolean AND) searches over
+each article's title and body.
 
-This program implements a simple search engine that builds
-an inverted index from a collection of text files and allows
-the user to perform Boolean AND queries across those documents.
+EXPECTED FILE FORMAT (one .txt file per article)
+-------------------------------------------------
+    line 1: source URL                  -> ignored
+    line 2: article title               -> indexed
+    line 3: blank separator line        -> ignored
+    line 4 onward: article body text    -> indexed
 
-Usage:
-    python searchengine.py <directory>          Build and print the index.
-    python searchengine.py <directory> -s       Build index and enter search mode.
+USAGE
+-----
+    python searchengine.py <folder_name>          # print the full index
+    python searchengine.py <folder_name> -s       # interactive search mode
 
-The program reads all .txt files from the specified directory,
-builds an inverted index mapping terms to the files that contain
-them, and optionally provides an interactive search interface.
+EXAMPLES
+--------
+    python searchengine.py bbcnews
+    python searchengine.py bbcnews -s
 """
 
 import os
@@ -23,219 +31,246 @@ import string
 from common_elements import common
 
 
-def textfiles_in_dir(dirname):
-    """
-    Returns a list of full file paths for all .txt files
-    found in the given directory.
+# A translation table that maps every punctuation character to None,
+# so str.translate() removes punctuation entirely (not just from the
+# edges of a word). Built once, at import time, so it isn't rebuilt
+# on every call to clean_word().
+PUNCTUATION_TABLE = str.maketrans("", "", string.punctuation)
 
-    Parameters:
-        dirname (str): Path to the directory to scan.
+
+def clean_word(word):
+    """
+    Normalize a single token so it can be used as an index key or
+    compared against an index key:
+      - convert to lowercase
+      - remove ALL punctuation characters anywhere in the word
+
+    This same function is used both when BUILDING the index and when
+    CLEANING the user's search query, which guarantees that a query
+    like "Stanford!" matches an indexed word "stanford".
+
+    >>> clean_word("Stanford")
+    'stanford'
+    >>> clean_word("bike!")
+    'bike'
+    >>> clean_word("U.S.A.")
+    'usa'
+    >>> clean_word("--")
+    ''
+    """
+    word = word.lower()
+    word = word.translate(PUNCTUATION_TABLE)
+    return word
+
+
+def add_words_to_index(text, filename, index):
+    """
+    Split `text` into whitespace-separated tokens, clean each one with
+    clean_word(), and record that `filename` contains that word.
+
+    `index` maps word -> set of filenames. A set is used here so that
+    a word appearing many times in one file still only adds that
+    filename once. The sets are converted to sorted lists afterwards,
+    in create_index(), to match the "word -> list of filenames" spec.
+    """
+    for raw_word in text.split():
+        word = clean_word(raw_word)
+        if word == "":
+            continue  # skip tokens that were pure punctuation, e.g. "--"
+
+        if word not in index:
+            index[word] = set()
+        index[word].add(filename)
+
+
+def create_index(folder_name):
+    """
+    Build the inverted index for every .txt file in `folder_name`.
 
     Returns:
-        list: Sorted list of absolute paths to .txt files.
+        index  -- dict mapping each word -> sorted list of filenames
+                  whose title or body contains that word
+        titles -- dict mapping each filename -> that article's title
+                  (used later so we can display titles in results)
+
+    Files that are missing, too short, or unreadable as text are
+    skipped rather than crashing the program, so one malformed file
+    in the folder can't bring the whole search engine down.
     """
-    filenames = []
-    for filename in os.listdir(dirname):
-        if filename.endswith('.txt'):
-            # Build the full path so files can be opened later
-            full_path = os.path.join(dirname, filename)
-            filenames.append(full_path)
-    filenames.sort()  # Sort for consistent ordering
-    return filenames
+    index = {}
+    titles = {}
+
+    # sorted() gives a deterministic processing order, which makes the
+    # program's behaviour repeatable/testable across runs and machines.
+    for filename in sorted(os.listdir(folder_name)):
+        filepath = os.path.join(folder_name, filename)
+
+        # Only look at regular .txt files; skip sub-folders, hidden
+        # files, or anything with a different extension.
+        if not filename.endswith(".txt") or not os.path.isfile(filepath):
+            continue
+
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except OSError:
+            # If the file can't be opened for some reason, skip it
+            # instead of letting the whole indexing process crash.
+            continue
+
+        # A valid article needs at least 4 lines (URL, title, blank,
+        # body). Skip anything shorter so it can't crash the program.
+        if len(lines) < 4:
+            continue
+
+        # Line 2 (index 1) is the title.
+        title = lines[1].strip()
+        titles[filename] = title if title else "(untitled)"
+
+        # Index every word in the title...
+        add_words_to_index(title, filename, index)
+
+        # ...and every word in the body, which starts on line 4
+        # (index 3) and runs to the end of the file.
+        body = "".join(lines[3:])
+        add_words_to_index(body, filename, index)
+
+    # Convert each set of filenames into a sorted list so the rest of
+    # the program (and anyone inspecting `index`) sees plain lists.
+    for word in index:
+        index[word] = sorted(index[word])
+
+    return index, titles
 
 
-def create_index(filenames, index, file_titles):
+def print_index(index):
     """
-    Builds an inverted index from a list of text files.
+    Print the entire inverted index in a readable, deterministic
+    format: one word per line, sorted alphabetically, followed by the
+    sorted list of filenames that contain it.
 
-    For each file:
-      - The first line is treated as the document title
-        and stored in file_titles[filename].
-      - The remaining lines are split into terms (by whitespace).
-      - Each term is cleaned: leading/trailing punctuation is
-        stripped and the term is lowercased.
-      - Empty terms (after stripping) are ignored.
-      - The inverted index maps each term to a list of filenames
-        containing that term (no duplicate filenames per term).
-
-    Parameters:
-        filenames (list): List of file paths to process.
-        index (dict): The inverted index dict to populate.
-                      key = term (str), value = list of filenames.
-        file_titles (dict): Dict to populate with file titles.
-                            key = filename (str), value = title (str).
+        bike: article1.txt, article3.txt
+        stanford: article1.txt, article2.txt
     """
-    for filename in filenames:
-        with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
+    if not index:
+        print("(The index is empty -- no .txt files were found.)")
+        return
 
-        if len(lines) == 0:
-            continue  # Skip empty files
-
-        # First line is the title (strip trailing whitespace/newline)
-        title = lines[0].strip()
-        file_titles[filename] = title
-
-        # Process the remaining lines for index terms
-        # Track which terms we've already added for this file
-        # to avoid duplicate filename entries in the index
-        terms_seen_in_file = set()
-
-        for line in lines[1:]:
-            # Split each line into whitespace-separated tokens
-            words = line.split()
-            for word in words:
-                # Strip punctuation from beginning and end
-                term = word.strip(string.punctuation)
-                # Lowercase the term
-                term = term.lower()
-
-                # Skip terms that became empty after stripping
-                if term == '':
-                    continue
-
-                # Add the term to the index if not already present
-                if term not in index:
-                    index[term] = []
-
-                # Only add filename once per term per file
-                if term not in terms_seen_in_file:
-                    index[term].append(filename)
-                    terms_seen_in_file.add(term)
+    for word in sorted(index):
+        files = ", ".join(index[word])
+        print(f"{word}: {files}")
 
 
 def search(index, query):
     """
-    Searches the inverted index for documents matching ALL
-    terms in the query (Boolean AND).
+    Look up `query` in `index` and return the SORTED list of filenames
+    that contain EVERY word in the query -- a Boolean AND search.
 
-    The query string is split into individual terms. For each
-    term, the list of matching filenames is retrieved from the
-    index. The results are intersected across all terms using
-    the common() function from common_elements.py.
+    A query like "stanford bike" will only match files whose title or
+    body contains BOTH "stanford" AND "bike" somewhere. The query is
+    cleaned with the exact same clean_word() function used when
+    building the index, so it is fully case- and punctuation-insensitive
+    (e.g. "Stanford!" matches the same files as "stanford").
 
-    Parameters:
-        index (dict): The inverted index (term -> list of filenames).
-        query (str): The search query (lowercase, no punctuation).
-                     Multiple terms are space-separated.
-
-    Returns:
-        list: Filenames that contain ALL query terms.
-              Returns an empty list if any term is not in the index.
+    Returns an empty list if:
+      - the query (after cleaning) has no words at all, or
+      - any word in the query does not appear in the index
+        (since then no file could possibly satisfy the AND).
     """
-    terms = query.split()
+    # Clean every word in the query, then drop any that became empty
+    # (e.g. a query of just "!" or "--").
+    query_words = [clean_word(w) for w in query.split()]
+    query_words = [w for w in query_words if w != ""]
 
-    if len(terms) == 0:
+    if not query_words:
         return []
 
-    # Start with the results for the first term
-    first_term = terms[0]
-    if first_term not in index:
-        return []  # If first term isn't indexed, no results possible
-    result = list(index[first_term])  # Copy the list to avoid mutation
+    # Start with the list of files containing the first query word.
+    first_word = query_words[0]
+    if first_word not in index:
+        return []
+    matches = index[first_word]
 
-    # Intersect with results for each subsequent term
-    for term in terms[1:]:
-        if term not in index:
-            return []  # Term not found, so AND intersection is empty
-        result = common(result, index[term])
+    # Repeatedly narrow down `matches` to only the files that ALSO
+    # contain each remaining query word, using the common() helper
+    # for Boolean AND.
+    for word in query_words[1:]:
+        if word not in index:
+            return []  # word appears nowhere -> AND can never match
+        matches = common(matches, index[word])
 
-    return result
+    return sorted(matches)
 
 
-def do_search(index, file_titles):
+def display_results(filenames, titles):
     """
-    Runs the interactive search loop.
+    Print search results in ranked order:
+        1. <title> (<filename>)
+        2. <title> (<filename>)
+        ...
+    or print "No results match that query." if `filenames` is empty.
+    """
+    if not filenames:
+        print("No results match that query.")
+        return
 
-    Repeatedly prompts the user for a search query,
-    performs the search, and displays the results with
-    document titles and filenames. An empty query exits.
+    for rank, filename in enumerate(filenames, start=1):
+        title = titles.get(filename, "(untitled)")
+        print(f"{rank}. {title} ({filename})")
 
-    Parameters:
-        index (dict): The inverted index.
-        file_titles (dict): Dict mapping filenames to titles.
+
+def run_search_loop(index, titles):
+    """
+    Repeatedly prompt the user for a search query and print the
+    matching results. Stops as soon as the user enters an empty (or
+    whitespace-only) query -- just pressing Enter.
     """
     while True:
-        query = input("Query (empty to quit): ")
+        query = input("Enter a query (press Enter to quit): ")
 
-        # Exit on empty query
-        if query == '':
+        # An empty (or all-whitespace) query ends the program.
+        if query.strip() == "":
+            print("Thanks for using Bajillion Search Engine!")
             break
 
-        # Perform the search
         results = search(index, query)
-
-        # Display results
-        if len(results) == 0:
-            print("No results match that query.")
-        else:
-            print(f"Found {len(results)} result(s):")
-            for filename in results:
-                title = file_titles.get(filename, "(no title)")
-                print(f"  {title} ({filename})")
-
-        print()  # Blank line between queries for readability
+        display_results(results, titles)
+        print()  # blank line between searches, for readability
 
 
-def main():
+def main(folder_name, interactive):
     """
-    Main entry point for the Bajillion Search Engine.
-
-    Handles command-line arguments:
-      - First argument: directory containing .txt files.
-      - Optional '-s' flag: enter interactive search mode
-        after building the index.
-
-    Without -s, the program builds and prints the inverted index.
-    With -s, the program builds the index and starts a search loop.
+    Build the inverted index from `folder_name`, report how much was
+    indexed, then either:
+      - print the full inverted index (default mode), or
+      - start the interactive search loop (if `interactive` is True).
     """
-    # Validate command-line arguments
-    if len(sys.argv) < 2:
-        print("Usage: python searchengine.py <directory> [-s]")
-        print("  <directory>  Path to folder containing .txt files")
-        print("  -s           Enter interactive search mode")
-        return
+    print(f"Indexing files in '{folder_name}'...")
+    index, titles = create_index(folder_name)
+    print(f"Indexed {len(titles)} file(s) and {len(index)} unique word(s).\n")
 
-    dirname = sys.argv[1]
-
-    # Check if the directory exists
-    if not os.path.isdir(dirname):
-        print(f"Error: '{dirname}' is not a valid directory.")
-        return
-
-    # Determine if search mode is requested
-    search_mode = '-s' in sys.argv
-
-    # Get all .txt files in the directory
-    filenames = textfiles_in_dir(dirname)
-    if len(filenames) == 0:
-        print(f"No .txt files found in '{dirname}'.")
-        return
-
-    print(f"Building index from {len(filenames)} file(s) in '{dirname}'...")
-
-    # Build the inverted index
-    index = {}
-    file_titles = {}
-    create_index(filenames, index, file_titles)
-
-    print(f"Index built with {len(index)} unique term(s).")
-    print()
-
-    if search_mode:
-        # Interactive search mode
-        print("=== Bajillion Search Engine ===")
-        print("Enter search terms (space-separated for AND queries).")
-        print()
-        do_search(index, file_titles)
-        print("Goodbye!")
+    if interactive:
+        run_search_loop(index, titles)
     else:
-        # Print the index (useful for debugging / the non-search case)
-        print("Inverted Index:")
-        print("-" * 40)
-        for term in sorted(index.keys()):
-            print(f"  '{term}' => {index[term]}")
+        print_index(index)
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    # Expect one required argument (the folder) and an optional "-s"
+    # flag to switch to interactive search mode:
+    #   python searchengine.py bbcnews        -> print full index
+    #   python searchengine.py bbcnews -s     -> interactive search
+    args = sys.argv[1:]
+
+    if len(args) not in (1, 2) or (len(args) == 2 and args[1] != "-s"):
+        print("Usage: python searchengine.py <folder_name> [-s]")
+        sys.exit(1)
+
+    folder_arg = args[0]
+    interactive_mode = "-s" in args
+
+    if not os.path.isdir(folder_arg):
+        print(f"Error: '{folder_arg}' is not a valid folder.")
+        sys.exit(1)
+
+    main(folder_arg, interactive_mode)
